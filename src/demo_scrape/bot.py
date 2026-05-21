@@ -262,7 +262,7 @@ def run_polling_bot(config: AppConfig) -> None:
                 except Exception:
                     pass
 
-            plan = build_search_plan(
+            plan = await build_search_plan(
                 session.pending_question,
                 config,
                 sources_override=sources,

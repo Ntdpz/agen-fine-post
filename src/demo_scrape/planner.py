@@ -37,7 +37,7 @@ _NOISE_PATTERNS = [
 ]
 
 
-def build_search_plan(
+async def build_search_plan(
     question: str,
     config: AppConfig,
     *,
@@ -57,7 +57,13 @@ def build_search_plan(
         if not sources:
             sources = ["facebook", "google"]
 
-    keyword = _extract_keyword(cleaned_question)
+    llm_keyword = await _extract_keyword_with_llm(cleaned_question, config)
+    if llm_keyword:
+        keyword = llm_keyword
+    else:
+        _log.debug("LLM keyword unavailable, falling back to rule-based extractor")
+        keyword = _extract_keyword(cleaned_question)
+
     _log.info("Plan ready | keyword=%r  sources=%s  max_posts=%s  max_google=%s",
               keyword, sources,
               max_posts_override or config.max_facebook_posts,
@@ -73,6 +79,56 @@ def build_search_plan(
     )
 
 
+async def _extract_keyword_with_llm(question: str, config: AppConfig) -> str | None:
+    """Call Ollama to extract a concise search keyword. Returns None on any failure."""
+    try:
+        import httpx
+    except ImportError:
+        return None
+    prompt = (
+        f"จากคำถามต่อไปนี้ ให้ตอบเฉพาะ search keyword ภาษาไทยหรืออังกฤษ 1-5 คำ เป็น phrase เดียว "
+        f"ห้ามมีจุลภาค ห้ามแบ่งเป็น list ห้ามอธิบายเพิ่มเติม:\n"
+        f"{question}"
+    )
+    payload = {
+        "model": config.ollama_model,
+        "stream": False,
+        "prompt": prompt,
+        "options": {"num_predict": 50},
+        "think": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{config.ollama_host}/api/generate", json=payload
+            )
+            response.raise_for_status()
+        result: str = response.json().get("response", "").strip()
+        # Strip thinking tags (<think>...</think>) from models like qwen3
+        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
+        # Keep only the first line if multi-line
+        result = result.splitlines()[0].strip() if result else ""
+        # If model returned a comma-separated list, take only the first item
+        result = result.split(",")[0].strip()
+        if result and _is_safe_keyword(result):
+            _log.info("LLM keyword extracted: %r", result)
+            return result
+        if result:
+            _log.warning("LLM keyword rejected (unexpected Unicode): %r", result)
+    except Exception as exc:
+        _log.warning("LLM keyword extraction failed: %s", exc)
+    return None
+
+
+# Allow only: Thai (U+0E00-U+0E7F), ASCII alphanumeric, space, hyphen, slash, plus, dot
+_SAFE_KEYWORD_RE = re.compile(r"^[\u0E00-\u0E7F0-9A-Za-z \-/+.]+$")
+
+
+def _is_safe_keyword(text: str) -> bool:
+    """Return True only if keyword contains no unexpected Unicode scripts (e.g. Cyrillic)."""
+    return bool(_SAFE_KEYWORD_RE.match(text))
+
+
 def _extract_keyword(question: str) -> str:
     quoted_match = re.search(r'["“](.+?)["”]', question)
     if quoted_match:
@@ -82,7 +138,7 @@ def _extract_keyword(question: str) -> str:
     for pattern in _NOISE_PATTERNS:
         reduced = re.sub(pattern, " ", reduced, flags=re.IGNORECASE)
 
-    reduced = re.sub(r"[^0-9A-Za-zก-๙\s-]", " ", reduced)
+    reduced = re.sub(r"[^0-9A-Za-zก-๙+.\s-]", " ", reduced)
     reduced = re.sub(r"\s+", " ", reduced).strip()
     if not reduced:
         return question.strip()

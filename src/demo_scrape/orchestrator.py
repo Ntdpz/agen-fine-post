@@ -43,7 +43,7 @@ class DemoOrchestrator:
                     pass
 
         if plan is None:
-            plan = build_search_plan(question, self._config)
+            plan = await build_search_plan(question, self._config)
 
         sources_label = " + ".join(s.capitalize() for s in plan.sources)
         _log.info("handle_question start | question=%r  keyword=%r  sources=%s",

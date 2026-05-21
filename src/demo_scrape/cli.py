@@ -50,7 +50,7 @@ def main() -> None:
         exit_code = asyncio.run(_run_health(config))
         raise SystemExit(exit_code)
     if args.command == "plan":
-        plan = build_search_plan(args.question, config)
+        plan = asyncio.run(build_search_plan(args.question, config))
         print(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2))
         return
     if args.command == "ask":
