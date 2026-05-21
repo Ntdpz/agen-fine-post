@@ -1,0 +1,2 @@
+[console_scripts]
+demo-scrape = demo_scrape.cli:main

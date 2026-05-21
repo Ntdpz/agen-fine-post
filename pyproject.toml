@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demo-scrape"
+version = "0.1.0"
+description = "Telegram demo bot that orchestrates Facebook and Google collection with Hermes formatting."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "beautifulsoup4>=4.12.3",
+  "httpx>=0.27.2",
+  "playwright>=1.54.0",
+  "python-telegram-bot>=22.1",
+]
+
+[project.scripts]
+demo-scrape = "demo_scrape.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
