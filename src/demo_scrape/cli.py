@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import os
+import sys
 
 from demo_scrape.bot import run_polling_bot
 from demo_scrape.config import AppConfig
@@ -10,7 +13,23 @@ from demo_scrape.orchestrator import DemoOrchestrator
 from demo_scrape.planner import build_search_plan
 
 
+def _setup_logging() -> None:
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stderr,
+    )
+    # Suppress noisy third-party loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("telegram").setLevel(logging.WARNING)
+    logging.getLogger("playwright").setLevel(logging.WARNING)
+
+
 def main() -> None:
+    _setup_logging()
     parser = argparse.ArgumentParser(prog="demo-scrape")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

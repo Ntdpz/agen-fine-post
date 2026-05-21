@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 
 from demo_scrape.config import AppConfig
 from demo_scrape.models import CollectionResult, FacebookPostResult, GoogleResult
+
+_log = logging.getLogger(__name__)
 
 
 class RelevanceFilter:
@@ -66,6 +69,8 @@ class RelevanceFilter:
                 "prompt": prompt,
                 "stream": False,
             }
+            _log.debug("LLM relevance request | model=%s  text_snippet=%r",
+                       self._config.ollama_model, text[:60])
             async with httpx.AsyncClient(timeout=5) as client:
                 resp = await client.post(
                     f"{self._config.ollama_host}/api/generate", json=payload
@@ -74,11 +79,17 @@ class RelevanceFilter:
                     raw = resp.json().get("response", "").strip()
                     match = re.search(r"\d+(?:\.\d+)?", raw)
                     if match:
-                        return min(max(float(match.group()) / 10.0, 0.0), 1.0)
-        except Exception:
-            pass
+                        score = min(max(float(match.group()) / 10.0, 0.0), 1.0)
+                        _log.debug("LLM relevance score=%.2f  raw=%r  snippet=%r",
+                                   score, raw, text[:40])
+                        return score
+        except Exception as exc:
+            _log.debug("LLM relevance failed (%s), using keyword fallback | snippet=%r",
+                       exc, text[:60])
 
-        return _keyword_overlap_score(question, text)
+        score = _keyword_overlap_score(question, text)
+        _log.debug("Keyword overlap score=%.2f  snippet=%r", score, text[:40])
+        return score
 
 
 def _keyword_overlap_score(question: str, text: str) -> float:

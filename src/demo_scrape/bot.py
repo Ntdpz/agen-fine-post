@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from html import escape
@@ -7,6 +8,8 @@ from html import escape
 from demo_scrape.config import AppConfig
 from demo_scrape.orchestrator import DemoOrchestrator
 from demo_scrape.planner import build_search_plan
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +189,7 @@ def run_polling_bot(config: AppConfig) -> None:
 
     async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
+        _log.info("Bot /start | user_id=%d", user_id)
         _reset_session(user_id)
         await update.message.reply_text("พร้อมรับคำถามแล้ว (session รีเซ็ตแล้ว)")
 
@@ -195,6 +199,7 @@ def run_polling_bot(config: AppConfig) -> None:
         user_id = update.effective_user.id
         session = _get_session(user_id)
         session.pending_question = update.message.text.strip()
+        _log.info("Bot message | user_id=%d  question=%r", user_id, session.pending_question[:80])
         keyboard = _build_settings_keyboard(session)
         await update.message.reply_text(
             _settings_summary(session),
@@ -237,12 +242,25 @@ def run_polling_bot(config: AppConfig) -> None:
             }
             sources = source_map[session.source_pref]
             source_label = {"facebook": "Facebook", "google": "Google", "both": "Facebook + Google"}[session.source_pref]
+            _log.info("Bot confirm search | user_id=%d  question=%r  sources=%s",
+                      user_id, session.pending_question[:80], session.source_pref)
 
-            await query.edit_message_text(
+            status_text = [
                 f"🔍 กำลังค้นหา: <b>{escape(session.pending_question)}</b>\n"
-                f"แหล่ง: {source_label} · โพส: {session.max_posts_pref} · ความเห็น: {session.max_comments_pref}/โพส",
-                parse_mode="HTML",
-            )
+                f"แหล่ง: {source_label} · โพส: {session.max_posts_pref} · ความเห็น: {session.max_comments_pref}/โพส"
+            ]
+            await query.edit_message_text(status_text[0], parse_mode="HTML")
+
+            async def _progress(msg: str) -> None:
+                """Edit the status message so users see live progress."""
+                status_text[0] = (
+                    f"🔍 <b>{escape(session.pending_question)}</b>\n"
+                    f"{escape(msg)}"
+                )
+                try:
+                    await query.edit_message_text(status_text[0], parse_mode="HTML")
+                except Exception:
+                    pass
 
             plan = build_search_plan(
                 session.pending_question,
@@ -258,8 +276,10 @@ def run_polling_bot(config: AppConfig) -> None:
                     plan=plan,
                     seen_fb_urls=session.seen_fb_urls,
                     seen_google_urls=session.seen_google_urls,
+                    progress_callback=_progress,
                 )
             except Exception as exc:
+                _log.error("Bot orchestrator error | user_id=%d  error=%s", user_id, exc)
                 await query.message.reply_text(f"ระบบประมวลผลไม่สำเร็จ: {exc}")
                 return
 
@@ -270,6 +290,8 @@ def run_polling_bot(config: AppConfig) -> None:
             for r in results.google_results:
                 session.seen_google_urls.add(r.url)
 
+            _log.info("Bot sending results | user_id=%d  fb=%d  google=%d",
+                      user_id, len(results.facebook_posts), len(results.google_results))
             await _send_results(query.message, rendered, results, config)
 
     application = Application.builder().token(config.telegram_bot_token).build()

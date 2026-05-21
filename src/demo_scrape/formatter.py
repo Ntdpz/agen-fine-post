@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 from urllib.parse import urlparse
 
 from demo_scrape.config import AppConfig
 from demo_scrape.models import CollectionResult, SearchPlan
+
+_log = logging.getLogger(__name__)
 
 
 async def _shorten_url(url: str) -> str:
@@ -30,9 +33,13 @@ class ResultFormatter:
         self._config = config
 
     async def format(self, plan: SearchPlan, results: CollectionResult) -> str:
+        _log.info("Formatter start | fb_posts=%d  google=%d",
+                  len(results.facebook_posts), len(results.google_results))
         llm_output = await self._try_ollama(plan, results)
         if llm_output and self._is_valid(llm_output):
+            _log.info("Formatter using LLM output | len=%d chars", len(llm_output))
             return llm_output.strip()
+        _log.info("Formatter using fallback render (LLM output invalid or absent)")
         return await self._fallback_render(plan, results)
 
     async def _try_ollama(self, plan: SearchPlan, results: CollectionResult) -> str | None:
@@ -46,16 +53,23 @@ class ResultFormatter:
             "stream": False,
             "prompt": self._build_prompt(plan, results),
         }
+        _log.debug("Ollama format request | model=%s  prompt_len=%d chars",
+                   self._config.ollama_model, len(payload["prompt"]))
 
         try:
             async with httpx.AsyncClient(timeout=self._config.request_timeout_seconds) as client:
                 response = await client.post(f"{self._config.ollama_host}/api/generate", json=payload)
                 response.raise_for_status()
-        except Exception:
+        except Exception as exc:
+            _log.warning("Ollama format request failed: %s", exc)
             return None
 
         data = response.json()
-        return data.get("response")
+        result = data.get("response")
+        if result:
+            _log.debug("Ollama format response | len=%d chars  valid=%s",
+                       len(result), self._is_valid(result))
+        return result
 
     def _build_prompt(self, plan: SearchPlan, results: CollectionResult) -> str:
         return (

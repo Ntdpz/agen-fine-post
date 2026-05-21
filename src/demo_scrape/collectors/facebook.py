@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 import re
 import shutil
 import tempfile
@@ -9,6 +10,8 @@ from urllib.parse import quote_plus, urljoin
 from demo_scrape.collectors.base import Collector
 from demo_scrape.config import AppConfig
 from demo_scrape.models import FacebookCommentResult, FacebookPostResult, SearchPlan
+
+_log = logging.getLogger(__name__)
 
 
 class FacebookCollector(Collector):
@@ -19,6 +22,7 @@ class FacebookCollector(Collector):
 
     async def collect(self, plan: SearchPlan) -> list[FacebookPostResult]:
         if self._config.use_stub_results:
+            _log.info("Facebook: using stub results | keyword=%r", plan.keyword)
             return _stub_posts(plan.keyword, plan.max_facebook_posts)
 
         if not self._config.facebook_profile_dir:
@@ -44,9 +48,11 @@ class FacebookCollector(Collector):
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 search_url = f"https://www.facebook.com/search/posts?q={quote_plus(plan.keyword)}"
+                _log.info("Facebook: navigating to search | url=%s", search_url)
                 await page.goto(search_url, wait_until="domcontentloaded")
                 if await page.locator("input[name='email']").count():
                     raise RuntimeError("Facebook session is not logged in for the configured Chrome profile")
+                _log.debug("Facebook: waiting for articles")
                 await page.wait_for_selector("[role='article']", timeout=self._config.request_timeout_seconds * 1000)
                 posts = await self._extract_posts(page, plan)
             except PlaywrightTimeoutError as exc:
@@ -57,6 +63,7 @@ class FacebookCollector(Collector):
         if not posts:
             raise RuntimeError("No Facebook posts were extracted")
 
+        _log.info("Facebook: collected %d posts | keyword=%r", len(posts), plan.keyword)
         return posts
 
     async def _extract_posts(self, page, plan: SearchPlan) -> list[FacebookPostResult]:
@@ -70,9 +77,11 @@ class FacebookCollector(Collector):
 
         # First pass: collect posts without comments so we never navigate away from
         # the search results page during this phase.
-        for _ in range(self._config.facebook_scroll_rounds):
+        for round_num in range(self._config.facebook_scroll_rounds):
             articles = page.locator("[role='article']")
             count = await articles.count()
+            _log.debug("Facebook scroll round %d/%d | articles_visible=%d",
+                       round_num + 1, self._config.facebook_scroll_rounds, count)
 
             for index in range(count):
                 article = articles.nth(index)
@@ -93,6 +102,7 @@ class FacebookCollector(Collector):
                         comments=[],
                     )
                 )
+                _log.debug("Facebook: post collected | author=%r  url=%s", author, post_url)
 
                 if len(posts) >= plan.max_facebook_posts:
                     break
@@ -104,17 +114,20 @@ class FacebookCollector(Collector):
             await page.wait_for_timeout(1500)
 
         # Second pass: fetch comments via a new tab so the search page stays intact.
-        for post in posts:
+        _log.info("Facebook: fetching comments for %d posts", len(posts))
+        for i, post in enumerate(posts):
             if not post.post_url:
                 continue
             try:
                 tab = await page.context.new_page()
+                _log.debug("Facebook: fetching comments post %d/%d | url=%s", i + 1, len(posts), post.post_url)
                 post.comments = await _fetch_comments_from_post_page(
                     tab, post.post_url, plan.max_comments_per_post
                 )
+                _log.debug("Facebook: got %d comments for post %d", len(post.comments), i + 1)
                 await tab.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("Facebook: comment fetch failed for post %d: %s", i + 1, exc)
 
         return posts
 

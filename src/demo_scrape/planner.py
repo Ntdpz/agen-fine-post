@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from demo_scrape.config import AppConfig
 from demo_scrape.models import SearchPlan
+
+_log = logging.getLogger(__name__)
 
 
 _SOURCE_HINTS = {
@@ -44,15 +47,21 @@ def build_search_plan(
 ) -> SearchPlan:
     cleaned_question = question.strip()
     lowered = cleaned_question.lower()
+    _log.info("Building search plan | question=%r", cleaned_question[:100])
 
     if sources_override is not None:
         sources = list(sources_override)
+        _log.debug("Sources overridden: %s", sources)
     else:
         sources = [source for source, hints in _SOURCE_HINTS.items() if any(hint in lowered for hint in hints)]
         if not sources:
             sources = ["facebook", "google"]
 
     keyword = _extract_keyword(cleaned_question)
+    _log.info("Plan ready | keyword=%r  sources=%s  max_posts=%s  max_google=%s",
+              keyword, sources,
+              max_posts_override or config.max_facebook_posts,
+              max_posts_override or config.max_google_results)
 
     return SearchPlan(
         raw_question=cleaned_question,

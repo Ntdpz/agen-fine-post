@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import unescape
+import logging
 import re
 from xml.etree import ElementTree
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -8,6 +9,8 @@ from urllib.parse import parse_qs, quote_plus, urlparse
 from demo_scrape.collectors.base import Collector
 from demo_scrape.config import AppConfig
 from demo_scrape.models import GoogleResult, SearchPlan
+
+_log = logging.getLogger(__name__)
 
 
 class GoogleCollector(Collector):
@@ -18,8 +21,10 @@ class GoogleCollector(Collector):
 
     async def collect(self, plan: SearchPlan) -> list[GoogleResult]:
         if self._config.use_stub_results:
+            _log.info("Google: using stub results | keyword=%r", plan.keyword)
             return _stub_results(plan.keyword, plan.max_google_results)
 
+        _log.info("Google: searching | keyword=%r  max=%d", plan.keyword, plan.max_google_results)
         try:
             import httpx
             from bs4 import BeautifulSoup
@@ -90,8 +95,10 @@ class GoogleCollector(Collector):
                 break
 
         if results:
+            _log.info("Google: found %d results | keyword=%r", len(results), plan.keyword)
             return results
 
+        _log.info("Google: no standard results, falling back to News RSS | keyword=%r", plan.keyword)
         return await self._collect_google_news_rss(plan)
 
     async def _collect_google_news_rss(self, plan: SearchPlan) -> list[GoogleResult]:
@@ -133,6 +140,7 @@ class GoogleCollector(Collector):
         if not results:
             raise RuntimeError("No Google results were parsed from the response")
 
+        _log.info("Google RSS: found %d results | keyword=%r", len(results), plan.keyword)
         return results
 
 
