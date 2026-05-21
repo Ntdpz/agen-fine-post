@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import math
 import re
 import shutil
 import tempfile
@@ -193,6 +194,42 @@ async def _fetch_comments_from_post_page(tab, post_url: str, max_comments: int =
         return []
     await tab.wait_for_timeout(1500)
 
+    # Load more comments by clicking "ดูความคิดเห็นเพิ่มเติม" / "View more comments"
+    max_clicks = math.ceil(max_comments / 3)
+    load_more_selectors = [
+        "[aria-label*='ความคิดเห็นเพิ่มเติม']",
+        "[aria-label*='View more comments']",
+        "div[role='button']:has-text('ดูความคิดเห็นเพิ่มเติม')",
+        "div[role='button']:has-text('View more comments')",
+    ]
+    prev_count = 0
+    for _ in range(max_clicks):
+        # Count current visible comment articles before clicking
+        cur_count = await tab.locator("[role='article'][aria-label*='ความคิดเห็น']").count()
+        if cur_count == 0:
+            cur_count = await tab.locator("[role='article']").count()
+        if cur_count >= max_comments:
+            break
+        clicked = False
+        for sel in load_more_selectors:
+            btn = tab.locator(sel).first
+            if await btn.count() > 0:
+                try:
+                    await btn.click()
+                    await tab.wait_for_timeout(1500)
+                    clicked = True
+                except Exception:
+                    pass
+                break
+        if not clicked:
+            break
+        new_count = await tab.locator("[role='article'][aria-label*='ความคิดเห็น']").count()
+        if new_count == 0:
+            new_count = await tab.locator("[role='article']").count()
+        if new_count <= prev_count:
+            break
+        prev_count = new_count
+
     comments: list[FacebookCommentResult] = []
     seen_texts: set[str] = set()
 
@@ -213,13 +250,25 @@ async def _fetch_comments_from_post_page(tab, post_url: str, max_comments: int =
     for index in range(start_index, n_count):
         node = comment_articles.nth(index)
         text = _normalize_whitespace(await node.inner_text())
-        if not text or text in seen_texts:
+        # Strip trailing Facebook UI metadata (e.g. "1 ชั่วโมง ถูกใจ ตอบกลับ")
+        # Requires a UI action word (ถูกใจ/ตอบกลับ/แก้ไขแล้ว) after the time unit
+        # so legitimate content like "ใช้เวลา 2 ชั่วโมง แล้วเสร็จ" is NOT stripped.
+        text = re.sub(
+            r"\s*\d+\s*(?:ชั่วโมง|นาที|วัน|สัปดาห์|เดือน)\s*(?:ถูกใจ|ตอบกลับ|แก้ไขแล้ว).*$",
+            "",
+            text,
+        ).strip()
+        if not text:
+            continue
+        # Dedup using whitespace-collapsed key to catch both spaced/unspaced variants
+        dedup_key = re.sub(r"\s+", "", text)
+        if dedup_key in seen_texts:
             continue
         if len(text) < 6 or len(text) > 600:
             continue
         if re.search(r"^(ถูกใจ|แสดงความคิดเห็น|แชร์|ตอบกลับ|เขียนความคิดเห็น|เขียน)", text):
             continue
-        seen_texts.add(text)
+        seen_texts.add(dedup_key)
         comment_url = None
         anchors = node.locator("a[href]")
         if await anchors.count():
