@@ -97,7 +97,7 @@ def _extract_keyword(question: str) -> str:
         if token.lower() in connectors:
             break
         selected.append(token)
-        if len(selected) == 4:
+        if len(selected) == 15:
             break
 
     return " ".join(selected).strip() or reduced

@@ -67,7 +67,7 @@ class AppConfig:
             max_facebook_posts=_env_int("MAX_FACEBOOK_POSTS", 3),
             max_google_results=_env_int("MAX_GOOGLE_RESULTS", 5),
             default_max_comments_per_post=_env_int("MAX_COMMENTS_PER_POST", 3),
-            facebook_scroll_rounds=_env_int("FACEBOOK_SCROLL_ROUNDS", 3),
+            facebook_scroll_rounds=_env_int("FACEBOOK_SCROLL_ROUNDS", 50),
             request_timeout_seconds=_env_int("REQUEST_TIMEOUT_SECONDS", 20),
             telegram_message_limit=_env_int("TELEGRAM_MESSAGE_LIMIT", 3500),
             use_stub_results=_env_bool("USE_STUB_RESULTS", False),

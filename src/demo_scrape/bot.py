@@ -141,7 +141,7 @@ async def _build_google_block(google_results) -> str:
 
 async def _send_results(message, rendered: str, results, config: AppConfig) -> None:
     for chunk in _split_message(rendered, config.telegram_message_limit):
-        await message.reply_text(chunk, disable_web_page_preview=True)
+        await message.reply_text(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
     for post in results.facebook_posts:
         caption = await _build_post_caption(post)

@@ -77,11 +77,15 @@ class FacebookCollector(Collector):
 
         # First pass: collect posts without comments so we never navigate away from
         # the search results page during this phase.
-        for round_num in range(self._config.facebook_scroll_rounds):
+        max_rounds = self._config.facebook_scroll_rounds  # safety cap
+        stale_rounds = 0
+        prev_article_count = 0
+        round_num = 0
+        while round_num < max_rounds:
             articles = page.locator("[role='article']")
             count = await articles.count()
             _log.debug("Facebook scroll round %d/%d | articles_visible=%d",
-                       round_num + 1, self._config.facebook_scroll_rounds, count)
+                       round_num + 1, max_rounds, count)
 
             for index in range(count):
                 article = articles.nth(index)
@@ -108,8 +112,20 @@ class FacebookCollector(Collector):
                     break
 
             if len(posts) >= plan.max_facebook_posts:
+                _log.debug("Facebook: reached max_facebook_posts=%d, stopping scroll", plan.max_facebook_posts)
                 break
 
+            # Stale detection: stop if DOM article count hasn't grown for 3 rounds
+            if count <= prev_article_count:
+                stale_rounds += 1
+                if stale_rounds >= 3:
+                    _log.debug("Facebook: content exhausted after %d stale rounds, stopping", stale_rounds)
+                    break
+            else:
+                stale_rounds = 0
+
+            prev_article_count = count
+            round_num += 1
             await page.keyboard.press("End")
             await page.wait_for_timeout(1500)
 
